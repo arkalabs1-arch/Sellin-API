@@ -97,6 +97,12 @@ class GenerateSellInPresentation:
         # Slide "Análise por Tipologia" ganhou um 2º gráfico com o crescimento mês a mês.
         graficos["abs_crescimento_tipologia_mensal.png"] = \
             self.chart_generator.gerar_grafico_crescimento_tipologia_mensal(resumo_absoluto)
+        # Slide "Análise por Tipologia" passou a mostrar 2 gráficos de linha: participação
+        # mensal em % de volume (m²) e em % de faturamento, lado a lado.
+        graficos["abs_participacao_mensal_volume.png"] = \
+            self.chart_generator.gerar_grafico_participacao_mensal_linha(resumo_absoluto, metrica="volume")
+        graficos["abs_participacao_mensal_faturamento.png"] = \
+            self.chart_generator.gerar_grafico_participacao_mensal_linha(resumo_absoluto, metrica="faturamento")
 
         for chave, dados in self.chart_generator.gerar_graficos_ticket_medio(resumo_comparativo).items():
             graficos[f"cmp_{chave}"] = dados

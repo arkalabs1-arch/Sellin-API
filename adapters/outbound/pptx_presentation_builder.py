@@ -339,7 +339,7 @@ class PythonPptxPresentationBuilder:
         p_anterior.font.name = FONTE
 
     def _slide_resumo_executivo(self, slide, insights: InsightsSellIn):
-        self._cabecalho(slide, "Resumo Executivo", periodo=self._periodo_texto(insights))
+        self._cabecalho(slide, "Panorama do Período", periodo=self._periodo_texto(insights))
 
         x_col1, x_col2 = 0.5, 6.87
         y_lin1, y_lin2 = 1.55, 4.45
@@ -368,10 +368,10 @@ class PythonPptxPresentationBuilder:
             NAVY,
         )
         self._cartao_resumo(
-            slide, x_col2, y_lin2, largura_cartao, altura_cartao, "Melhor mês",
-            f"{insights.melhor_mes_label} ({self._fmt_mi(insights.melhor_mes_valor)})",
-            (f"{insights.rotulo_anterior}: {insights.melhor_mes_anterior_label} "
-             f"({self._fmt_mi(insights.melhor_mes_anterior_valor)})") if insights.comparar_ano_anterior else "",
+            slide, x_col2, y_lin2, largura_cartao, altura_cartao, "Média de Faturamento Mensal",
+            self._fmt_mi(insights.faturamento_medio_mensal_atual),
+            texto_anterior(self._fmt_mi(insights.faturamento_medio_mensal_anterior),
+                           insights.faturamento_variacao_pct),
             GOLD,
         )
 
@@ -450,6 +450,8 @@ class PythonPptxPresentationBuilder:
         caixa = slide.shapes.add_textbox(x, y, largura, Inches(0.4))
         tf = caixa.text_frame
         tf.word_wrap = True
+        tf.margin_top = 0
+        tf.margin_bottom = 0
         p = tf.paragraphs[0]
         p.text = texto
         p.font.size = Pt(tamanho_fonte)
@@ -482,10 +484,70 @@ class PythonPptxPresentationBuilder:
 
         self._titulo_grafico(slide, titulo_esq, x=x_esq, largura=largura_meio, y=Inches(y_topo), tamanho_fonte=14)
         self._titulo_grafico(slide, titulo_dir, x=x_dir, largura=largura_meio, y=Inches(y_topo), tamanho_fonte=14)
-        y_img = Inches(y_topo + 0.38)
+        y_img = Inches(y_topo + 0.3)
         altura = ALTURA_SLIDE - y_img - Inches(0.3)
         self._imagem_ajustada(slide, dados_esq, x_esq, y_img, largura_meio, altura)
         self._imagem_ajustada(slide, dados_dir, x_dir, y_img, largura_meio, altura)
+
+    def _grafico_com_tabela(self, slide, dados: bytes, y_topo: float, colunas: list[str], linhas: list[tuple],
+                             titulo_grafico: str | None = None):
+        """Layout com o grafico a esquerda (~56% da largura) e uma tabela com os mesmos
+        valores a direita -- usado no ranking de clientes, pra mostrar o nome completo
+        de cada cliente (que nao cabe inteiro dentro da barra) junto com o faturamento."""
+        margem = Inches(0.4)
+        largura_total = LARGURA_SLIDE - Inches(1.0)
+        largura_grafico = int(largura_total * 0.56)
+        x_grafico = Inches(0.5)
+        x_tabela = x_grafico + largura_grafico + margem
+        largura_tabela = largura_total - largura_grafico - margem
+
+        y = Inches(y_topo)
+        if titulo_grafico:
+            self._titulo_grafico(slide, titulo_grafico, x=x_grafico, largura=largura_grafico, y=y, tamanho_fonte=14)
+            y = Inches(y_topo + 0.38)
+        altura = ALTURA_SLIDE - y - Inches(0.3)
+        self._imagem_ajustada(slide, dados, x_grafico, y, largura_grafico, altura)
+
+        self._tabela_ranking_clientes(slide, x_tabela, Inches(y_topo), largura_tabela,
+                                       ALTURA_SLIDE - Inches(y_topo) - Inches(0.3), colunas, linhas)
+
+    def _tabela_ranking_clientes(self, slide, x: Emu, y: Emu, largura: Emu, altura: Emu,
+                                  colunas: list[str], linhas: list[tuple]):
+        """Tabela com os mesmos valores do ranking de clientes (nome completo + valores),
+        ao lado do grafico -- 'colunas' sao os cabecalhos, 'linhas' uma lista de tuplas
+        ja formatadas como texto (1 valor por coluna)."""
+        n_linhas = len(linhas) + 1
+        n_colunas = len(colunas)
+        forma = slide.shapes.add_table(n_linhas, n_colunas, x, y, largura, altura)
+        tabela = forma.table
+
+        largura_cliente = int(largura * 0.42)
+        largura_valor = int((largura - largura_cliente) / max(n_colunas - 1, 1))
+        tabela.columns[0].width = largura_cliente
+        for i in range(1, n_colunas):
+            tabela.columns[i].width = largura_valor
+
+        def formatar_celula(celula, texto, cabecalho, alinhar_direita):
+            celula.text = texto
+            celula.vertical_anchor = MSO_ANCHOR.MIDDLE
+            celula.margin_left = Inches(0.06)
+            celula.margin_right = Inches(0.06)
+            celula.margin_top = Inches(0.02)
+            celula.margin_bottom = Inches(0.02)
+            celula.fill.solid()
+            celula.fill.fore_color.rgb = NAVY if cabecalho else WHITE
+            p = celula.text_frame.paragraphs[0]
+            p.alignment = PP_ALIGN.RIGHT if alinhar_direita else PP_ALIGN.LEFT
+            p.font.size = Pt(10.5 if cabecalho else 10)
+            p.font.bold = cabecalho
+            p.font.name = FONTE
+            p.font.color.rgb = WHITE if cabecalho else DARK_TEXT
+
+        for j, titulo_coluna in enumerate(colunas):
+            formatar_celula(tabela.cell(0, j), titulo_coluna, True, j > 0)
+        for i, linha in enumerate(linhas, start=1):
+            for j, valor in enumerate(linha):
+                formatar_celula(tabela.cell(i, j), str(valor), False, j > 0)
 
     def _imagem_ajustada(self, slide, dados: bytes, x: Emu, y: Emu, largura_max: Emu, altura_max: Emu):
         from PIL import Image
@@ -507,7 +569,7 @@ class PythonPptxPresentationBuilder:
         return texto.replace(",", "§").replace(".", ",").replace("§", ".")
 
     def _fmt_mi(self, valor: Decimal) -> str:
-        return f"R$ {self._numero_br(float(valor) / 1_000_000, 0)} mi"
+        return f"R$ {self._numero_br(float(valor) / 1_000_000, 0)} milhões"
 
     def _fmt_mil(self, valor: Decimal) -> str:
         return f"{self._numero_br(float(valor) / 1_000, 0)}K m²"
@@ -520,7 +582,7 @@ class PythonPptxPresentationBuilder:
         tipologia inteira (onde _fmt_mi, sempre em milhoes, funciona bem)."""
         valor_mil = float(valor) / 1_000
         if abs(valor_mil) >= 1000:
-            return f"R$ {self._numero_br(valor_mil / 1000, 0)} mi"
+            return f"R$ {self._numero_br(valor_mil / 1000, 0)} milhões"
         return f"R$ {self._numero_br(valor_mil, 0)}K"
 
     def _fmt_pct(self, valor: Decimal) -> str:
@@ -636,8 +698,8 @@ class PythonPptxPresentationBuilder:
         ])
         self._duas_imagens(
             slide,
-            graficos[f"{prefixo}tipologia_mensal.png"], f"Participação mensal no faturamento (%){sufixo_titulo}",
-            graficos[f"{prefixo}crescimento_tipologia_mensal.png"], "Crescimento mês a mês (%)",
+            graficos[f"{prefixo}participacao_mensal_volume.png"], f"Participação mensal em volume (%){sufixo_titulo}",
+            graficos[f"{prefixo}participacao_mensal_faturamento.png"], f"Participação mensal em faturamento (%){sufixo_titulo}",
             y_topo,
         )
 
@@ -726,14 +788,13 @@ class PythonPptxPresentationBuilder:
         tm_atual = insights.ticket_medio_atual.get(tipologia, Decimal(0))
         vol_atual = insights.volume_tipologia_atual.get(tipologia, Decimal(0))
 
-        y_topo = self._cabecalho(slide, f"Preço por m² — {tipologia}", periodo=self._periodo_texto(insights),
+        y_topo = self._cabecalho(slide, f"Análise - {tipologia} por m²", periodo=self._periodo_texto(insights),
                                   stats=[
                                       (self._fmt_r_por_m2(tm_atual), "Preço médio", cor),
                                       (self._fmt_mil(vol_atual), "Volume vendido", GOLD),
                                   ])
 
-        self._grafico_cheio(slide, graficos[f"{prefixo}{CHAVES_IMAGEM_TICKET_MEDIO[tipologia]}"], y_topo,
-                             titulo_grafico=f"Volume por m² — {tipologia}")
+        self._grafico_cheio(slide, graficos[f"{prefixo}{CHAVES_IMAGEM_TICKET_MEDIO[tipologia]}"], y_topo)
 
     def _slide_faturamento_tipologia(self, slide, insights: InsightsSellIn, graficos: dict[str, bytes],
                                       tipologia: str, prefixo: str = ""):
@@ -924,11 +985,11 @@ class PythonPptxPresentationBuilder:
         """Um so slide com 2 graficos de pizza lado a lado: proporcao por m² e
         proporcao por faturamento, ambos do periodo selecionado (sem comparacao com
         ano anterior) -- ate a v5 do deck eram 2 barras empilhadas."""
-        y_topo = self._cabecalho(slide, "Proporção por Tipologia", periodo=self._periodo_texto(insights))
+        y_topo = self._cabecalho(slide, "Participação por Tipologia", periodo=self._periodo_texto(insights))
         self._duas_imagens(
             slide,
-            graficos[f"{prefixo}pizza_volume.png"], "Proporção por m² (%)",
-            graficos[f"{prefixo}pizza_faturamento.png"], "Proporção por faturamento (%)",
+            graficos[f"{prefixo}pizza_volume.png"], "Volume por m²",
+            graficos[f"{prefixo}pizza_faturamento.png"], "Faturamento",
             y_topo,
         )
 
@@ -936,23 +997,17 @@ class PythonPptxPresentationBuilder:
                                               prefixo: str = ""):
         y_topo = self._cabecalho(slide, "Faturamento — Todas as Tipologias", periodo=self._periodo_texto(insights),
                                   stats=[(self._fmt_mi(insights.faturamento_atual), "Faturamento total", NAVY)])
-        self._grafico_cheio(slide, graficos[f"{prefixo}faturamento_tipologias.png"], y_topo,
-                             titulo_grafico="Faturamento total — todas as tipologias (R$)")
+        self._grafico_cheio(slide, graficos[f"{prefixo}faturamento_tipologias.png"], y_topo)
 
     def _slide_formatos_tipologia(self, slide, insights: InsightsSellIn, graficos: dict[str, bytes],
                                    tipologia: str, prefixo: str = ""):
         """Estudo de formatos: participacao (%) de cada formato (ex: 33x46) DENTRO de
-        uma tipologia, por volume (m²) vendido."""
-        formato_vol, pct_vol = self._formato_lider(
-            insights.qtde_por_formato.get(insights.ano_atual, {}).get(tipologia, {}))
-
-        y_topo = self._cabecalho(slide, f"Formatos — {tipologia}", periodo=self._periodo_texto(insights), stats=[
-            (formato_vol, f"Líder por volume ({self._numero_br(float(pct_vol), 0)}%)", GOLD),
-        ])
+        uma tipologia, por volume (m²) vendido, mes a mes."""
+        y_topo = self._cabecalho(slide, f"Participação por Formatos - {tipologia}",
+                                  periodo=self._periodo_texto(insights))
 
         sufixo = CHAVES_ARQUIVO_TIPOLOGIA[tipologia]
-        self._grafico_cheio(slide, graficos[f"{prefixo}formatos_{sufixo}_volume.png"], y_topo,
-                             titulo_grafico="Participação de cada formato no volume (%)")
+        self._grafico_cheio(slide, graficos[f"{prefixo}formatos_{sufixo}_volume.png"], y_topo)
 
     def _slide_ranking_clientes(self, slide, insights: InsightsSellIn, graficos: dict[str, bytes], prefixo: str = ""):
         """Top 10 clientes por faturamento -- sempre por ultimo no bloco, depois do
@@ -968,8 +1023,27 @@ class PythonPptxPresentationBuilder:
              f"Líder: {cliente_lider} ({self._numero_br(float(pct_lider), 0)}%)", GOLD),
         ])
 
-        self._grafico_cheio(slide, graficos[f"{prefixo}ranking_clientes.png"], y_topo,
-                             titulo_grafico="Top 10 clientes por faturamento (R$)")
+        top10 = sorted(faturamento_clientes_atual.items(), key=lambda kv: kv[1], reverse=True)[:10]
+        if insights.comparar_ano_anterior:
+            faturamento_clientes_anterior = insights.faturamento_por_cliente.get(insights.ano_anterior, {})
+            colunas = ["Cliente", f"Faturamento {insights.rotulo_atual}",
+                       f"Faturamento {insights.rotulo_anterior}", "Variação %"]
+            linhas = []
+            for cliente, valor_atual in top10:
+                valor_anterior = faturamento_clientes_anterior.get(cliente, Decimal(0))
+                if valor_anterior:
+                    variacao = (valor_atual / valor_anterior - 1) * 100
+                    texto_variacao = f"{'+' if variacao >= 0 else ''}{self._numero_br(float(variacao), 0)}%"
+                else:
+                    texto_variacao = "—"
+                linhas.append((cliente, self._fmt_r_dinamico(valor_atual),
+                                self._fmt_r_dinamico(valor_anterior), texto_variacao))
+        else:
+            colunas = ["Cliente", "Faturamento"]
+            linhas = [(cliente, self._fmt_r_dinamico(valor)) for cliente, valor in top10]
+
+        self._grafico_com_tabela(slide, graficos[f"{prefixo}ranking_clientes.png"], y_topo, colunas, linhas,
+                                  titulo_grafico="Top 10 clientes por faturamento (R$)")
 
     # ------------------------------------- bloco 3: periodo livre x periodo livre
 
@@ -1068,5 +1142,18 @@ class PythonPptxPresentationBuilder:
                                           f"Líder em {insights.periodo1_label}: {cliente_lider} "
                                           f"({self._numero_br(float(pct_lider), 0)}%)", GOLD)])
 
-        self._grafico_cheio(slide, graficos["periodo_ranking_clientes.png"], y_topo,
-                             titulo_grafico="Top 10 clientes por faturamento (R$)")
+        top10 = sorted(insights.faturamento_por_cliente_periodo1.items(), key=lambda kv: kv[1], reverse=True)[:10]
+        colunas = ["Cliente", f"Faturamento {insights.periodo1_label}",
+                   f"Faturamento {insights.periodo2_label}", "Variação %"]
+        linhas = []
+        for cliente, valor1 in top10:
+            valor2 = insights.faturamento_por_cliente_periodo2.get(cliente, Decimal(0))
+            if valor2:
+                variacao = (valor1 / valor2 - 1) * 100
+                texto_variacao = f"{'+' if variacao >= 0 else ''}{self._numero_br(float(variacao), 0)}%"
+            else:
+                texto_variacao = "—"
+            linhas.append((cliente, self._fmt_r_dinamico(valor1), self._fmt_r_dinamico(valor2), texto_variacao))
+
+        self._grafico_com_tabela(slide, graficos["periodo_ranking_clientes.png"], y_topo, colunas, linhas,
+                                  titulo_grafico="Top 10 clientes por faturamento (R$)")

@@ -61,7 +61,7 @@ class MatplotlibChartGenerator:
         numero ja e' grande o bastante pra virar '8,82 mi'."""
         if abs(valor_mil) >= 1000:
             texto = f"{valor_mil / 1000:,.0f}".replace(",", "§").replace(".", ",").replace("§", ".")
-            return f"{texto} mi"
+            return f"{texto} milhões"
         texto = f"{valor_mil:,.0f}".replace(",", "§").replace(".", ",").replace("§", ".")
         return f"{texto}K"
 
@@ -158,8 +158,8 @@ class MatplotlibChartGenerator:
         total_atu = sum(resumo.faturamento_mensal.get((ano_atu, m), Decimal(0)) for m in meses)
         variacao = (total_atu / total_ant - 1) * 100 if total_ant else Decimal(0)
         fig.text(0.5, 0.02,
-                  f"Faturamento total: R\\$ {total_ant/1_000_000:.0f} mi ({resumo.rotulo_anterior}) "
-                  f"→ R\\$ {total_atu/1_000_000:.0f} mi ({resumo.rotulo_atual})  |  variação: {float(variacao):+.0f}%",
+                  f"Faturamento total: R\\$ {total_ant/1_000_000:.0f} milhões ({resumo.rotulo_anterior}) "
+                  f"→ R\\$ {total_atu/1_000_000:.0f} milhões ({resumo.rotulo_atual})  |  variação: {float(variacao):+.0f}%",
                   ha="center", fontsize=10, color="#6B7280")
 
         fig.tight_layout(rect=(0, 0.05, 1, 0.95))
@@ -334,11 +334,12 @@ class MatplotlibChartGenerator:
         return self._tipologias_juntas_slide(resumo, metrica="volume")
 
     def gerar_grafico_faturamento_tipologias(self, resumo: ResumoSellIn) -> bytes:
-        """Faturamento total (R$ mil) mes a mes, com as 3 tipologias juntas no mesmo
-        grafico (cada uma com 2 linhas: ano anterior tracejado, ano atual solido)."""
+        """Participacao (%) de cada tipologia no faturamento total, mes a mes, com as
+        3 tipologias juntas no mesmo grafico (cada uma com 2 linhas: ano anterior
+        tracejado, ano atual solido)."""
         plt.rcParams["font.family"] = "sans-serif"
         plt.rcParams["font.sans-serif"] = ["DejaVu Sans", "Arial"]
-        return self._tipologias_juntas_slide(resumo, metrica="faturamento")
+        return self._tipologias_juntas_slide(resumo, metrica="faturamento_pct")
 
     def gerar_grafico_representatividade_volume(self, resumo: ResumoSellIn) -> bytes:
         """Participacao (%) de cada tipologia no volume total vendido (m²) -- mesma
@@ -436,11 +437,56 @@ class MatplotlibChartGenerator:
         return self._barra_empilhada_proporcao(linhas, categorias=formatos, cores=cores,
                                                 mostrar_legenda=True, largura_fig=8.6)
 
+    def _formatos_tipologia_mensal_slide(self, resumo: ResumoSellIn, tipologia: str) -> bytes:
+        """Estudo de formatos: participacao (%) de cada formato (ex: 33x46) DENTRO de
+        uma unica tipologia, mes a mes -- uma linha por formato, mesma logica de
+        _participacao_mensal_linha_slide (linha em vez de barra empilhada, a pedido
+        do cliente)."""
+        formatos = FORMATOS_POR_TIPOLOGIA[tipologia]
+        cores = dict(zip(formatos, self._paleta_distinta_formatos(len(formatos))))
+        ano_ant, ano_atu = resumo.ano_anterior, resumo.ano_atual
+
+        if resumo.comparar_ano_anterior and ano_ant != ano_atu:
+            chaves = [(ano, mes) for ano in (ano_ant, ano_atu) for mes in resumo.meses_comparados]
+            chaves_display = resumo.periodo_anterior_chaves + resumo.periodo_atual_chaves
+        else:
+            chaves = [(ano_atu, mes) for mes in resumo.meses_comparados]
+            chaves_display = resumo.periodo_atual_chaves
+
+        xr = list(range(len(chaves)))
+        series = {f: [] for f in formatos}
+        for chave in chaves:
+            totais_mes = resumo.qtde_por_formato_mensal.get(chave, {}).get(tipologia, {})
+            total_mes = sum(totais_mes.values()) or Decimal(1)
+            for f in formatos:
+                series[f].append(float(totais_mes.get(f, Decimal(0)) / total_mes) * 100)
+
+        fig, ax = plt.subplots(figsize=(8.6, 3.9))
+        for formato in formatos:
+            ax.plot(xr, series[formato], linewidth=2, marker="o", markersize=3.5,
+                    color=cores[formato], label=formato)
+
+        ax.set_xticks(xr)
+        labels_reduzidos = self._reduzir_labels_por_ano(chaves_display)
+        ax.set_xticklabels(labels_reduzidos, fontsize=9)
+        ax.set_ylim(0, 100)
+        ax.yaxis.set_major_formatter(mticker.PercentFormatter())
+        ax.tick_params(axis="y", labelsize=9)
+        ax.spines[["top", "right"]].set_visible(False)
+        if len(chaves) > len(resumo.meses_comparados):
+            ax.axvline(x=len(resumo.meses_comparados) - 0.5, color="#D1D5DB", linewidth=2,
+                       linestyle="--", alpha=0.8)
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncols=min(len(formatos), 5),
+                  frameon=False, fontsize=8)
+        fig.tight_layout()
+        return self._salvar(fig, transparente=True)
+
     def gerar_grafico_formatos_tipologia_volume(self, resumo: ResumoSellIn, tipologia: str) -> bytes:
-        """Participacao (%) de cada formato no volume (m²) DENTRO da tipologia informada."""
+        """Participacao (%) de cada formato no volume (m²) DENTRO da tipologia informada,
+        mes a mes (uma linha por formato)."""
         plt.rcParams["font.family"] = "sans-serif"
         plt.rcParams["font.sans-serif"] = ["DejaVu Sans", "Arial"]
-        return self._formatos_tipologia_slide(resumo, tipologia, resumo.qtde_por_formato)
+        return self._formatos_tipologia_mensal_slide(resumo, tipologia)
 
     def gerar_grafico_formatos_tipologia_faturamento(self, resumo: ResumoSellIn, tipologia: str) -> bytes:
         """Participacao (%) de cada formato no faturamento (R$) DENTRO da tipologia informada."""
@@ -767,6 +813,54 @@ class MatplotlibChartGenerator:
         fig.tight_layout()
         return self._salvar(fig, transparente=True)
 
+    def gerar_grafico_participacao_mensal_linha(self, resumo: ResumoSellIn, metrica: str) -> bytes:
+        """Participacao (%) de cada tipologia mes a mes, em linha -- metrica 'volume'
+        usa qtde_tipologia_mensal (m²), metrica 'faturamento' usa faturamento_tipologia_mensal
+        (R$). Usado no slide 'Análise por Tipologia' (2 graficos lado a lado)."""
+        plt.rcParams["font.family"] = "sans-serif"
+        plt.rcParams["font.sans-serif"] = ["DejaVu Sans", "Arial"]
+        return self._participacao_mensal_linha_slide(resumo, metrica)
+
+    def _participacao_mensal_linha_slide(self, resumo: ResumoSellIn, metrica: str) -> bytes:
+        tipologias = ["Cerâmica", "Porcelanato", "Super Prime"]
+        ano_ant, ano_atu = resumo.ano_anterior, resumo.ano_atual
+
+        if resumo.comparar_ano_anterior and ano_ant != ano_atu:
+            chaves = [(ano, mes) for ano in (ano_ant, ano_atu) for mes in resumo.meses_comparados]
+            chaves_display = resumo.periodo_anterior_chaves + resumo.periodo_atual_chaves
+        else:
+            chaves = [(ano_atu, mes) for mes in resumo.meses_comparados]
+            chaves_display = resumo.periodo_atual_chaves
+
+        dados_mensais = resumo.qtde_tipologia_mensal if metrica == "volume" else resumo.faturamento_tipologia_mensal
+
+        xr = list(range(len(chaves)))
+        series = {t: [] for t in tipologias}
+        for chave in chaves:
+            totais_mes = dados_mensais.get(chave, {})
+            total_mes = sum(totais_mes.values()) or Decimal(1)
+            for t in tipologias:
+                series[t].append(float(totais_mes.get(t, Decimal(0)) / total_mes) * 100)
+
+        fig, ax = plt.subplots(figsize=(4.0, 2.7))
+        for tipologia in tipologias:
+            ax.plot(xr, series[tipologia], linewidth=2, marker="o", markersize=3.5,
+                    color=COR_TIPOLOGIA[tipologia], label=tipologia)
+
+        ax.set_xticks(xr)
+        labels_reduzidos = self._reduzir_labels_por_ano(chaves_display)
+        ax.set_xticklabels(labels_reduzidos, fontsize=8)
+        ax.set_ylim(0, 100)
+        ax.yaxis.set_major_formatter(mticker.PercentFormatter())
+        ax.tick_params(axis="y", labelsize=9)
+        ax.spines[["top", "right"]].set_visible(False)
+        if len(chaves) > len(resumo.meses_comparados):
+            ax.axvline(x=len(resumo.meses_comparados) - 0.5, color="#D1D5DB", linewidth=2,
+                       linestyle="--", alpha=0.8)
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncols=3, frameon=False, fontsize=8)
+        fig.tight_layout()
+        return self._salvar(fig, transparente=True)
+
     def _ticket_medio_tipologia_slide(self, resumo: ResumoSellIn, tipologia: str) -> bytes:
         """Apesar do nome (mantido por compatibilidade com as chaves de arquivo ja
         usadas em outros pontos do codigo), este grafico mostra o VOLUME vendido (mil
@@ -840,7 +934,7 @@ class MatplotlibChartGenerator:
         ax.yaxis.set_visible(False)
         ax.tick_params(axis="x", length=0)
         ax.margins(y=0.35)
-        ax.legend(loc="upper left", frameon=False, ncols=2, fontsize=11)
+        ax.legend(loc="lower right", frameon=False, ncols=2, fontsize=11)
         fig.tight_layout()
         return self._salvar(fig, transparente=True)
     def _faturamento_tipologia_slide(self, resumo: ResumoSellIn, tipologia: str) -> bytes:
@@ -1088,7 +1182,7 @@ class MatplotlibChartGenerator:
         ano_ant, ano_atu = resumo.ano_anterior, resumo.ano_atual
         x = list(range(len(tipologias)))
 
-        fmt_mi = lambda v: f"R$ {v:,.0f} mi".replace(",", "§").replace(".", ",").replace("§", ".")
+        fmt_mi = lambda v: f"R$ {v:,.0f} milhões".replace(",", "§").replace(".", ",").replace("§", ".")
 
         series = []
         if resumo.comparar_ano_anterior:
@@ -1134,12 +1228,18 @@ class MatplotlibChartGenerator:
             if metrica == "ticket_medio":
                 qtd = resumo.qtde_tipologia_mensal.get((ano, mes), {}).get(tipologia, Decimal(0))
                 return float(fat / qtd) if qtd else 0.0
+            if metrica == "faturamento_pct":
+                totais_mes = resumo.faturamento_tipologia_mensal.get((ano, mes), {})
+                total_mes = sum(totais_mes.values()) or Decimal(1)
+                return float(fat / total_mes) * 100
             return float(fat) / 1_000
 
         if metrica == "volume":
             fmt = lambda v: f"{v:,.0f}".replace(".", ",") + "K m²"
         elif metrica == "ticket_medio":
             fmt = lambda v: f"{v:,.0f}".replace(".", ",")
+        elif metrica == "faturamento_pct":
+            fmt = lambda v: f"{v:.0f}%"
         else:
             fmt = self._fmt_faturamento_dinamico
 
@@ -1457,7 +1557,9 @@ class MatplotlibChartGenerator:
                           path_effects=[patheffects.withStroke(linewidth=3, foreground="white")])
 
         ax.set_yticks(y)
-        ax.set_yticklabels([self._truncar_cliente(c) for c in clientes_exibicao], fontsize=10)
+        # Nome completo do cliente no eixo (a pedido do cliente) -- limite bem alto so
+        # pra nao deixar um nome absurdamente longo quebrar o layout.
+        ax.set_yticklabels([self._truncar_cliente(c, limite=200) for c in clientes_exibicao], fontsize=10)
         ax.xaxis.set_visible(False)
         ax.spines[["top", "right", "bottom"]].set_visible(False)
         ax.tick_params(axis="y", length=0)

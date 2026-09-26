@@ -22,6 +22,8 @@ class InsightsSellIn:
     melhor_mes_valor: Decimal
     melhor_mes_anterior_label: str
     melhor_mes_anterior_valor: Decimal
+    faturamento_medio_mensal_atual: Decimal
+    faturamento_medio_mensal_anterior: Decimal
     ticket_medio_geral_atual: Decimal
     ticket_medio_geral_anterior: Decimal
     ticket_medio_geral_variacao_pct: Decimal
@@ -195,6 +197,8 @@ def montar_insights(resumo: ResumoSellIn) -> InsightsSellIn:
         melhor_mes_valor=melhor_mes_valor,
         melhor_mes_anterior_label=rotulo_mes(melhor_mes_anterior, resumo.periodo_anterior_chaves),
         melhor_mes_anterior_valor=melhor_mes_anterior_valor,
+        faturamento_medio_mensal_atual=(fat_atu / len(meses)) if meses else Decimal(0),
+        faturamento_medio_mensal_anterior=(fat_ant / len(meses)) if meses else Decimal(0),
         ticket_medio_geral_atual=ticket_medio_geral_atu,
         ticket_medio_geral_anterior=ticket_medio_geral_ant,
         ticket_medio_geral_variacao_pct=ticket_medio_geral_var,

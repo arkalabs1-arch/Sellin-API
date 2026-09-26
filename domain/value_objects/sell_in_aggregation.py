@@ -71,6 +71,9 @@ class ResumoSellIn:
     # {ano_atual|ano_anterior: {tipologia: {formato: valor}}} -- estudo de formatos.
     faturamento_por_formato: dict = field(default_factory=dict)
     qtde_por_formato: dict = field(default_factory=dict)
+    # {(ano_atual|ano_anterior, mes): {tipologia: {formato: valor}}} -- mesma coisa,
+    # quebrada mes a mes (usada no grafico de linha de participacao por formato).
+    qtde_por_formato_mensal: dict = field(default_factory=dict)
     # {ano_atual|ano_anterior: {cliente: valor}} -- ranking de Top 10 clientes.
     faturamento_por_cliente: dict = field(default_factory=dict)
     mes_atual_excluido: bool = False
@@ -264,6 +267,7 @@ def _agregar(registros: list[SaleRecord], ano_anterior: int, ano_atual: int,
     dimensoes_nao_mapeadas = defaultdict(int)
     faturamento_por_formato = defaultdict(lambda: defaultdict(lambda: defaultdict(Decimal)))
     qtde_por_formato = defaultdict(lambda: defaultdict(lambda: defaultdict(Decimal)))
+    qtde_por_formato_mensal = defaultdict(lambda: defaultdict(lambda: defaultdict(Decimal)))
     faturamento_por_cliente = defaultdict(lambda: defaultdict(Decimal))
 
     chaves_atual = set(periodo_atual_chaves)
@@ -303,6 +307,7 @@ def _agregar(registros: list[SaleRecord], ano_anterior: int, ano_atual: int,
         qtde_tipologia_mensal[chave_rotulada][tipologia] += r.qtde
         faturamento_por_formato[rotulo_ano][tipologia][dimensao] += r.valor
         qtde_por_formato[rotulo_ano][tipologia][dimensao] += r.qtde
+        qtde_por_formato_mensal[chave_rotulada][tipologia][dimensao] += r.qtde
 
     return ResumoSellIn(
         ano_anterior=ano_anterior,
@@ -319,6 +324,8 @@ def _agregar(registros: list[SaleRecord], ano_anterior: int, ano_atual: int,
                                   for ano, tv in faturamento_por_formato.items()},
         qtde_por_formato={ano: {t: dict(f) for t, f in tv.items()}
                            for ano, tv in qtde_por_formato.items()},
+        qtde_por_formato_mensal={chave: {t: dict(f) for t, f in tv.items()}
+                                  for chave, tv in qtde_por_formato_mensal.items()},
         faturamento_por_cliente={ano: dict(v) for ano, v in faturamento_por_cliente.items()},
         mes_atual_excluido=mes_atual_excluido,
         comparar_ano_anterior=comparar_ano_anterior,

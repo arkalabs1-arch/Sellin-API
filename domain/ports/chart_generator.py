@@ -101,3 +101,6 @@ class ChartGenerator(Protocol):
 
     def gerar_grafico_crescimento_tipologia_mensal(self, resumo: ResumoSellIn) -> bytes:
         ...
+
+    def gerar_grafico_participacao_mensal_linha(self, resumo: ResumoSellIn, metrica: str) -> bytes:
+        ...

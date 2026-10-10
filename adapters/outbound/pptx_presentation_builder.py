@@ -13,6 +13,12 @@ LARGURA_SLIDE = Inches(13.333)
 ALTURA_SLIDE = Inches(7.5)
 LARGURA_PAINEL = Inches(4.2)
 
+# Bloco 3 (periodo 1 livre x periodo 2 livre) fica pronto no codigo mas desligado da
+# apresentacao a pedido do cliente ("nao vamos utilizar no momento") -- todo o codigo
+# (agregacao, graficos, slides) continua intacto, so nao e' mais chamado. Pra reativar
+# no futuro, basta voltar isso pra True.
+BLOCO_3_HABILITADO = False
+
 NAVY = RGBColor(0x1F, 0x4E, 0x79)
 GRAY_BLUE = RGBColor(0x8F, 0xA6, 0xC7)
 GOLD = RGBColor(0xD9, 0xA4, 0x41)
@@ -136,7 +142,7 @@ class PythonPptxPresentationBuilder:
         self._slide_ranking_clientes(novo_slide(), insights_comparativo, graficos, prefixo="cmp_")
 
         # Bloco 3 (opcional) - periodo 1 livre x periodo 2 livre, escolhidos pelo usuario
-        if insights_periodos is not None:
+        if BLOCO_3_HABILITADO and insights_periodos is not None:
             for tipologia in ("Cerâmica", "Porcelanato", "Super Prime"):
                 self._slide_periodo_m2_tipologia(novo_slide(), insights_periodos, graficos, tipologia)
             self._slide_periodo_m2_tipologias_juntas(novo_slide(), insights_periodos, graficos)
@@ -443,7 +449,8 @@ class PythonPptxPresentationBuilder:
         p.font.color.rgb = GRAY_BLUE
         p.font.name = FONTE
 
-    def _titulo_grafico(self, slide, texto: str, x=None, largura=None, tamanho_fonte: int = 20, y=None):
+    def _titulo_grafico(self, slide, texto: str, x=None, largura=None, tamanho_fonte: int = 20, y=None,
+                         centralizado: bool = False):
         x = x if x is not None else LARGURA_PAINEL + Inches(0.4)
         largura = largura if largura is not None else LARGURA_SLIDE - LARGURA_PAINEL - Inches(0.8)
         y = y if y is not None else Inches(0.4)
@@ -458,6 +465,8 @@ class PythonPptxPresentationBuilder:
         p.font.bold = True
         p.font.color.rgb = DARK_TEXT
         p.font.name = FONTE
+        if centralizado:
+            p.alignment = PP_ALIGN.CENTER
 
     def _grafico_cheio(self, slide, dados: bytes, y_topo: float = 1.34, titulo_grafico: str | None = None):
         """Grafico ocupando (quase) o slide inteiro, usado no novo layout sem painel
@@ -482,8 +491,10 @@ class PythonPptxPresentationBuilder:
         x_esq = Inches(0.5)
         x_dir = x_esq + largura_meio + margem
 
-        self._titulo_grafico(slide, titulo_esq, x=x_esq, largura=largura_meio, y=Inches(y_topo), tamanho_fonte=14)
-        self._titulo_grafico(slide, titulo_dir, x=x_dir, largura=largura_meio, y=Inches(y_topo), tamanho_fonte=14)
+        self._titulo_grafico(slide, titulo_esq, x=x_esq, largura=largura_meio, y=Inches(y_topo), tamanho_fonte=14,
+                              centralizado=True)
+        self._titulo_grafico(slide, titulo_dir, x=x_dir, largura=largura_meio, y=Inches(y_topo), tamanho_fonte=14,
+                              centralizado=True)
         y_img = Inches(y_topo + 0.3)
         altura = ALTURA_SLIDE - y_img - Inches(0.3)
         self._imagem_ajustada(slide, dados_esq, x_esq, y_img, largura_meio, altura)
@@ -804,8 +815,7 @@ class PythonPptxPresentationBuilder:
         y_topo = self._cabecalho(slide, f"Faturamento — {tipologia}", periodo=self._periodo_texto(insights),
                                   stats=[(self._fmt_mi(fat_atual), "Faturamento", cor)])
 
-        self._grafico_cheio(slide, graficos[f"{prefixo}{CHAVES_IMAGEM_FATURAMENTO_TIPOLOGIA[tipologia]}"], y_topo,
-                             titulo_grafico=f"Faturamento — {tipologia} (R$)")
+        self._grafico_cheio(slide, graficos[f"{prefixo}{CHAVES_IMAGEM_FATURAMENTO_TIPOLOGIA[tipologia]}"], y_topo)
 
     def _slide_participacao_tipologia(self, slide, insights: InsightsSellIn, graficos: dict[str, bytes],
                                        tipologia: str, desempenho_mensal: bool = False):
@@ -968,8 +978,7 @@ class PythonPptxPresentationBuilder:
         de cada tipologia no volume (m²) vendido, em vez do volume absoluto de cada
         uma (que já aparecia nos slides individuais de cada tipologia)."""
         y_topo = self._cabecalho(slide, "Participação por Tipologia", periodo=self._periodo_texto(insights))
-        self._grafico_cheio(slide, graficos[f"{prefixo}representatividade_volume.png"], y_topo,
-                             titulo_grafico="Participação de cada tipologia no volume (m²)")
+        self._grafico_cheio(slide, graficos[f"{prefixo}representatividade_volume.png"], y_topo)
 
     def _slide_representatividade_volume(self, slide, insights: InsightsSellIn, graficos: dict[str, bytes],
                                           prefixo: str = ""):
@@ -1042,8 +1051,7 @@ class PythonPptxPresentationBuilder:
             colunas = ["Cliente", "Faturamento"]
             linhas = [(cliente, self._fmt_r_dinamico(valor)) for cliente, valor in top10]
 
-        self._grafico_com_tabela(slide, graficos[f"{prefixo}ranking_clientes.png"], y_topo, colunas, linhas,
-                                  titulo_grafico="Top 10 clientes por faturamento (R$)")
+        self._grafico_com_tabela(slide, graficos[f"{prefixo}ranking_clientes.png"], y_topo, colunas, linhas)
 
     # ------------------------------------- bloco 3: periodo livre x periodo livre
 
@@ -1073,8 +1081,7 @@ class PythonPptxPresentationBuilder:
         so que aqui comparando periodo 1 x periodo 2 (a imagem ja existia, so passou
         a ser o grafico principal do slide em vez de compartilhar espaço com volume)."""
         y_topo = self._cabecalho(slide, "Participação por Tipologia", periodo=self._periodo_texto_bloco3(insights))
-        self._grafico_cheio(slide, graficos["periodo_proporcao_volume.png"], y_topo,
-                             titulo_grafico="Participação de cada tipologia no volume (m²)")
+        self._grafico_cheio(slide, graficos["periodo_proporcao_volume.png"], y_topo)
 
     def _slide_periodo_faturamento_tipologia(self, slide, insights: InsightsComparativoPeriodos,
                                               graficos: dict[str, bytes], tipologia: str):
@@ -1085,15 +1092,13 @@ class PythonPptxPresentationBuilder:
                                   stats=[(self._fmt_mi(fat1), f"Faturamento em {insights.periodo1_label}", cor)])
 
         sufixo = CHAVES_ARQUIVO_TIPOLOGIA[tipologia]
-        self._grafico_cheio(slide, graficos[f"periodo_faturamento_{sufixo}.png"], y_topo,
-                             titulo_grafico=f"Faturamento — {tipologia} (R$)")
+        self._grafico_cheio(slide, graficos[f"periodo_faturamento_{sufixo}.png"], y_topo)
 
     def _slide_periodo_faturamento_tipologias_juntas(self, slide, insights: InsightsComparativoPeriodos,
                                                        graficos: dict[str, bytes]):
         y_topo = self._cabecalho(slide, "Faturamento — Todas as Tipologias",
                                   periodo=self._periodo_texto_bloco3(insights))
-        self._grafico_cheio(slide, graficos["periodo_faturamento_tipologias.png"], y_topo,
-                             titulo_grafico="Faturamento total — todas as tipologias (R$)")
+        self._grafico_cheio(slide, graficos["periodo_faturamento_tipologias.png"], y_topo)
 
     def _slide_periodo_proporcao_volume(self, slide, insights: InsightsComparativoPeriodos,
                                          graficos: dict[str, bytes]):
@@ -1127,8 +1132,7 @@ class PythonPptxPresentationBuilder:
                                           GOLD)])
 
         sufixo = CHAVES_ARQUIVO_TIPOLOGIA[tipologia]
-        self._grafico_cheio(slide, graficos[f"periodo_formatos_{sufixo}_volume.png"], y_topo,
-                             titulo_grafico="Participação de cada formato no volume (%)")
+        self._grafico_cheio(slide, graficos[f"periodo_formatos_{sufixo}_volume.png"], y_topo)
 
     def _slide_periodo_ranking_clientes(self, slide, insights: InsightsComparativoPeriodos,
                                          graficos: dict[str, bytes]):
@@ -1155,5 +1159,4 @@ class PythonPptxPresentationBuilder:
                 texto_variacao = "—"
             linhas.append((cliente, self._fmt_r_dinamico(valor1), self._fmt_r_dinamico(valor2), texto_variacao))
 
-        self._grafico_com_tabela(slide, graficos["periodo_ranking_clientes.png"], y_topo, colunas, linhas,
-                                  titulo_grafico="Top 10 clientes por faturamento (R$)")
+        self._grafico_com_tabela(slide, graficos["periodo_ranking_clientes.png"], y_topo, colunas, linhas)

@@ -465,6 +465,7 @@ class MatplotlibChartGenerator:
         for formato in formatos:
             ax.plot(xr, series[formato], linewidth=2, marker="o", markersize=3.5,
                     color=cores[formato], label=formato)
+        self._anotar_series_sem_colisao(ax, xr, series, cores, fontsize=6.5, gap_minimo=5.0, offset_base=2.5)
 
         ax.set_xticks(xr)
         labels_reduzidos = self._reduzir_labels_por_ano(chaves_display)
@@ -493,6 +494,26 @@ class MatplotlibChartGenerator:
         plt.rcParams["font.family"] = "sans-serif"
         plt.rcParams["font.sans-serif"] = ["DejaVu Sans", "Arial"]
         return self._formatos_tipologia_slide(resumo, tipologia, resumo.faturamento_por_formato)
+
+    def _anotar_series_sem_colisao(self, ax, indices_x: list[int], series: dict[str, list[float]],
+                                    cores: dict[str, str], fontsize: float = 7, gap_minimo: float = 6.0,
+                                    offset_base: float = 3.0):
+        """Anota o valor de cada serie (dict nome -> lista de valores, uma por indice em
+        'indices_x') em cima de cada ponto, empilhando os rotulos de cima pra baixo (do
+        maior valor pro menor) com um espacamento minimo em unidades de dado -- evita que
+        rotulos de series com valores parecidos (comum nesses graficos de participacao,
+        onde varias linhas ficam proximas) se sobreponham na hora de ler."""
+        nomes = list(series.keys())
+        for xi in indices_x:
+            pontos = sorted(((nome, series[nome][xi]) for nome in nomes), key=lambda item: -item[1])
+            y_label_anterior = None
+            for nome, v in pontos:
+                y_label = v + offset_base
+                if y_label_anterior is not None:
+                    y_label = min(y_label, y_label_anterior - gap_minimo)
+                y_label_anterior = y_label
+                ax.annotate(f"{v:.0f}%", (xi, y_label), ha="center", va="bottom", fontsize=fontsize,
+                            fontweight="bold", color=cores[nome])
 
     def _reduzir_labels_por_ano(self, chaves: list[tuple[int, int]]) -> list[str]:
         """Mantem sempre o primeiro mes de cada ano visivel e reduz de 2 em 2 dentro de
@@ -554,9 +575,10 @@ class MatplotlibChartGenerator:
         return self._representatividade_generica_slide(resumo, resumo.qtde_por_tipologia, outro)
 
     def _representatividade_generica_slide(self, resumo: ResumoSellIn, por_ano: dict, outro_totais: dict | None) -> bytes:
-        """Desenha a barra empilhada de representatividade por tipologia a partir de
-        um dicionario {ano: {tipologia: valor}} generico -- usado tanto para
-        faturamento quanto para volume (m²), so trocando o dicionario de entrada."""
+        """Desenha a participacao (%) de cada tipologia em linha (ex-barra empilhada,
+        convertida a pedido do cliente) a partir de um dicionario {ano: {tipologia:
+        valor}} generico -- usado tanto para faturamento quanto para volume (m²), so
+        trocando o dicionario de entrada."""
         linhas = []
         if resumo.outro_periodo is not None and outro_totais is not None:
             linhas.append((resumo.outro_periodo.label, outro_totais))
@@ -564,10 +586,46 @@ class MatplotlibChartGenerator:
             linhas.append((resumo.rotulo_anterior, por_ano.get(resumo.ano_anterior, {})))
         linhas.append((resumo.rotulo_atual, por_ano.get(resumo.ano_atual, {})))
 
-        # mostrar_legenda=True: esse grafico agora e' o conteudo principal (as vezes
-        # unico) do slide, sem mais o painel lateral com os nomes das tipologias ao
-        # lado -- sem legenda, as cores da barra ficavam sem identificacao nenhuma.
-        return self._barra_empilhada_proporcao(linhas, mostrar_legenda=True, largura_fig=8.6)
+        return self._participacao_categorica_linha_slide(
+            linhas, categorias=["Cerâmica", "Porcelanato", "Super Prime"], largura_fig=8.6)
+
+    def _participacao_categorica_linha_slide(self, linhas: list[tuple[str, dict]], categorias: list[str],
+                                              cores_series: list[str] | None = None,
+                                              largura_fig: float = 8.6) -> bytes:
+        """Grafico de linha comparando a participacao (%) de cada categoria (tipologia
+        ou formato) entre 1 ou mais series (ex: ano atual x anterior, periodo1 x
+        periodo2) -- substitui a barra horizontal empilhada usada antes (a pedido do
+        cliente, todo grafico de barra deitada virou linha). Uma linha por serie,
+        ligando os pontos de cada categoria no eixo X; o eixo Y e' sempre a
+        participacao percentual da categoria DENTRO da serie (as fatias de uma mesma
+        serie somam 100%)."""
+        paleta_padrao = [COR_OUTRO_PERIODO, COR_ANO_ANTERIOR, COR_ANO_ATUAL]
+        cores_series = cores_series if cores_series is not None else paleta_padrao[-len(linhas):]
+
+        x = list(range(len(categorias)))
+        fig, ax = plt.subplots(figsize=(largura_fig, 3.9))
+        for indice, ((rotulo, totais), cor) in enumerate(zip(linhas, cores_series)):
+            total = sum(float(v) for v in totais.values()) or 1.0
+            valores = [float(totais.get(c, Decimal(0))) / total * 100 for c in categorias]
+            ax.plot(x, valores, marker="o", markersize=6, linewidth=2.3, color=cor, label=rotulo)
+            # Quando ha mais de uma serie, alterna o rotulo acima/abaixo do ponto pra
+            # nao colidir quando as linhas ficam proximas (ex: 2 periodos parecidos).
+            deslocamento = 10 if indice % 2 == 0 else -16
+            for xi, v in zip(x, valores):
+                ax.annotate(f"{v:.0f}%", (xi, v), textcoords="offset points", xytext=(0, deslocamento),
+                            ha="center", fontsize=9, fontweight="bold", color=cor)
+
+        ax.set_xticks(x)
+        ax.set_xticklabels(categorias, fontsize=10 if len(categorias) <= 4 else 9)
+        ax.set_ylim(0, 100)
+        ax.margins(y=0.3)
+        ax.yaxis.set_visible(False)
+        ax.spines[["top", "right", "left"]].set_visible(False)
+        ax.tick_params(axis="x", length=0)
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.14), ncols=min(len(linhas), 3),
+                  frameon=False, fontsize=9)
+        fig.tight_layout()
+        return self._salvar(fig, transparente=True)
 
     def _paleta_formatos(self, cor_base_hex: str, n: int) -> list[str]:
         """Gera N tons distintos (do mais escuro ao mais claro) a partir de UMA cor
@@ -846,6 +904,7 @@ class MatplotlibChartGenerator:
         for tipologia in tipologias:
             ax.plot(xr, series[tipologia], linewidth=2, marker="o", markersize=3.5,
                     color=COR_TIPOLOGIA[tipologia], label=tipologia)
+        self._anotar_series_sem_colisao(ax, xr, series, COR_TIPOLOGIA, fontsize=6, gap_minimo=8.0, offset_base=3.0)
 
         ax.set_xticks(xr)
         labels_reduzidos = self._reduzir_labels_por_ano(chaves_display)
@@ -997,7 +1056,7 @@ class MatplotlibChartGenerator:
         ax.yaxis.set_visible(False)
         ax.tick_params(axis="x", length=0)
         ax.margins(y=0.35)
-        ax.legend(loc="upper left", frameon=False, ncols=2, fontsize=11)
+        ax.legend(loc="lower right", frameon=False, ncols=2, fontsize=11)
         fig.tight_layout()
         return self._salvar(fig, transparente=True)
 
@@ -1476,7 +1535,9 @@ class MatplotlibChartGenerator:
         plt.rcParams["font.family"] = "sans-serif"
         plt.rcParams["font.sans-serif"] = ["DejaVu Sans", "Arial"]
         linhas = [(periodo1.label, periodo1.qtde_por_tipologia), (periodo2.label, periodo2.qtde_por_tipologia)]
-        return self._barra_empilhada_proporcao(linhas)
+        return self._participacao_categorica_linha_slide(
+            linhas, categorias=["Cerâmica", "Porcelanato", "Super Prime"],
+            cores_series=[COR_ANO_ATUAL, COR_OUTRO_PERIODO], largura_fig=8.6)
 
     def gerar_grafico_periodo_proporcao_faturamento(self, periodo1: OutroPeriodoTotais,
                                                      periodo2: OutroPeriodoTotais) -> bytes:
@@ -1484,7 +1545,9 @@ class MatplotlibChartGenerator:
         plt.rcParams["font.sans-serif"] = ["DejaVu Sans", "Arial"]
         linhas = [(periodo1.label, periodo1.faturamento_por_tipologia),
                   (periodo2.label, periodo2.faturamento_por_tipologia)]
-        return self._barra_empilhada_proporcao(linhas)
+        return self._participacao_categorica_linha_slide(
+            linhas, categorias=["Cerâmica", "Porcelanato", "Super Prime"],
+            cores_series=[COR_ANO_ATUAL, COR_OUTRO_PERIODO], largura_fig=8.6)
 
     def _periodo_formatos_tipologia_slide(self, periodo1: OutroPeriodoTotais, periodo2: OutroPeriodoTotais,
                                            tipologia: str, atributo: str) -> bytes:
@@ -1497,9 +1560,8 @@ class MatplotlibChartGenerator:
             (periodo2.label, getattr(periodo2, atributo).get(tipologia, {})),
         ]
         formatos = FORMATOS_POR_TIPOLOGIA[tipologia]
-        cores = dict(zip(formatos, self._paleta_distinta_formatos(len(formatos))))
-        return self._barra_empilhada_proporcao(linhas, categorias=formatos, cores=cores,
-                                                mostrar_legenda=True, largura_fig=8.6)
+        return self._participacao_categorica_linha_slide(
+            linhas, categorias=formatos, cores_series=[COR_ANO_ATUAL, COR_OUTRO_PERIODO], largura_fig=8.6)
 
     def gerar_grafico_periodo_formatos_tipologia_volume(self, periodo1: OutroPeriodoTotais,
                                                           periodo2: OutroPeriodoTotais, tipologia: str) -> bytes:
